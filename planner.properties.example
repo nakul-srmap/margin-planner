@@ -1,0 +1,13 @@
+# Copy this file to planner.properties (same folder) and fill it in.
+db.url=jdbc:postgresql://localhost:5432/planner
+db.user=postgres
+db.password=change-me
+port=8080
+
+# Optional: AI quick add. Free key from https://aistudio.google.com/apikey
+gemini.api.key=
+# gemini.model=  (optional; Margin picks the newest Gemini Flash model by itself)
+
+# Optional: Google Classroom sync. See "Google Classroom" in README.md.
+google.client.id=
+google.client.secret=
