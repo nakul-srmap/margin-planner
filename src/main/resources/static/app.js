@@ -183,13 +183,32 @@
     const file = input.files[0], key = input.dataset.fileTo;
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) { toast("That file is over 8 MB. Use a smaller screenshot or PDF."); input.value = ""; return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result);
+    const put = (url, mime) => {
       document.getElementById(key + "-data").value = url.slice(url.indexOf(",") + 1);
-      document.getElementById(key + "-mime").value = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+      document.getElementById(key + "-mime").value = mime;
     };
-    reader.readAsDataURL(file);
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf && window.createImageBitmap) {
+      // Photos are shrunk to 2000 px on the long side: still sharp for reading, far faster to send.
+      createImageBitmap(file).then(img => {
+        const scale = Math.min(1, 2000 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        const g = c.getContext("2d");
+        g.fillStyle = "#fff";
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        put(c.toDataURL("image/jpeg", 0.85), "image/jpeg");
+      }).catch(() => readRaw());
+    } else {
+      readRaw();
+    }
+    function readRaw() {
+      const reader = new FileReader();
+      reader.onload = () => put(String(reader.result), isPdf ? "application/pdf" : (file.type || "image/jpeg"));
+      reader.readAsDataURL(file);
+    }
   }));
 
   /* ---------- filter the task list ---------- */

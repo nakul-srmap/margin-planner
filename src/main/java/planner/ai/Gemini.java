@@ -34,44 +34,52 @@ public final class Gemini {
             throw new AiException("Add your Gemini API key to planner.properties as gemini.api.key, then restart Margin.");
         }
         String chosen = Config.setting("GEMINI_MODEL", "gemini.model");
+        boolean withFile = base64 != null;
         String model = chosen != null ? chosen : found != null ? found : "gemini-flash-latest";
-        String file = base64 == null ? "" : ",{\"inlineData\":{\"mimeType\":" + Json.quote(mimeType) + ",\"data\":" + Json.quote(base64) + "}}";
+        if (chosen == null && withFile) {
+            String lite = fastest(key);   // lite models read documents much faster
+            if (lite != null) {
+                model = lite;
+            }
+        }
+        int seconds = withFile ? 75 : 40;
+        String file = !withFile ? "" : ",{\"inlineData\":{\"mimeType\":" + Json.quote(mimeType) + ",\"data\":" + Json.quote(base64) + "}}";
         String body = "{\"contents\":[{\"parts\":[{\"text\":" + Json.quote(prompt) + "}" + file + "]}],"
                 + "\"generationConfig\":{\"responseMimeType\":\"application/json\",\"temperature\":0.2}}";
-        HttpResponse<String> res = call(key, model, body);
-        if (chosen == null && (res.statusCode() == 404 || res.statusCode() == 401 || res.statusCode() == 400)) {
+        Reply res = attempt(key, model, body, seconds);
+        if (chosen == null && (res.status() == 404 || res.status() == 401 || res.status() == 400)) {
             // Models are retired often; ask Google which ones this key can use and retry once.
             String latest = newestFlash(key);
             if (latest != null && !latest.equals(model)) {
                 found = latest;
                 model = latest;
-                res = call(key, model, body);
+                res = attempt(key, model, body, seconds);
             }
         }
-        // Busy or briefly failing: retry once, then try other current models (also when gemini.model is set).
-        for (int attempt = 0; busy(res) && attempt < 1; attempt++) {
-            Thread.sleep(1500L * (attempt + 1));
-            res = call(key, model, body);
+        // Busy, failing or too slow: retry once, then try other current models (also when gemini.model is set).
+        if (busy(res) && res.status() != 504) {
+            Thread.sleep(1500);
+            res = attempt(key, model, body, seconds);
         }
         if (busy(res)) {
             for (String other : alternatives(key, model)) {
-                HttpResponse<String> r = call(key, other, body);
-                if (r.statusCode() == 200) {
+                Reply r = attempt(key, other, body, seconds);
+                if (r.status() == 200) {
                     res = r;
                     model = other;
                     break;
                 }
             }
         }
-        if (res.statusCode() != 200) {
+        if (res.status() != 200) {
             String msg = Json.str(Json.at(safe(res.body()), "error", "message"));
             String detail = msg == null ? "" : " Google said: " + msg;
-            throw new AiException(switch (res.statusCode()) {
-                case 400, 401, 403 -> "Gemini refused the request (" + res.statusCode() + ", model " + model + ")." + detail;
+            throw new AiException(switch (res.status()) {
+                case 400, 401, 403 -> "Gemini refused the request (" + res.status() + ", model " + model + ")." + detail;
                 case 404 -> "The Gemini model " + model + " isn't available. Set gemini.model in planner.properties." + detail;
                 case 429 -> "Gemini's free limit was reached. Wait a minute and try again.";
-                case 500, 502, 503, 504 -> "Gemini is very busy right now, on every model Margin tried. Try again in a minute.";
-                default -> "Gemini didn't answer (" + res.statusCode() + ")." + detail;
+                case 500, 502, 503, 504 -> "Gemini is very busy or slow right now, on every model Margin tried. Try again in a minute.";
+                default -> "Gemini didn't answer (" + res.status() + ")." + detail;
             });
         }
         String text = Json.str(Json.at(safe(res.body()), "candidates", 0, "content", "parts", 0, "text"));
@@ -84,33 +92,46 @@ public final class Gemini {
     private static volatile String found;
 
     /** Asks the model to think briefly: reading dates from a note doesn't need deep reasoning, and it's much faster. */
-    private static HttpResponse<String> call(String key, String model, String body) throws IOException, InterruptedException {
+    private record Reply(int status, String body) { }
+
+    /** One request; a timeout counts as "too slow" (504) so the next model gets a turn. */
+    private static Reply attempt(String key, String model, String body, int seconds) throws IOException, InterruptedException {
+        try {
+            HttpResponse<String> r = call(key, model, body, seconds);
+            return new Reply(r.statusCode(), r.body());
+        } catch (java.net.http.HttpTimeoutException e) {
+            System.out.printf("Gemini %s -> no answer within %d s%n", model, seconds);
+            return new Reply(504, "{}");
+        }
+    }
+
+    private static HttpResponse<String> call(String key, String model, String body, int seconds) throws IOException, InterruptedException {
         String thinking = model.startsWith("gemini-2") ? "\"thinkingConfig\":{\"thinkingBudget\":0}," : "\"thinkingConfig\":{\"thinkingLevel\":\"low\"},";
-        HttpResponse<String> res = send(key, model, body.replace("\"generationConfig\":{", "\"generationConfig\":{" + thinking));
+        HttpResponse<String> res = send(key, model, seconds, body.replace("\"generationConfig\":{", "\"generationConfig\":{" + thinking));
         if (res.statusCode() == 400 && res.body().toLowerCase().contains("think")) {
-            res = send(key, model, body);   // this model doesn't take that setting; ask without it
+            res = send(key, model, seconds, body);   // this model doesn't take that setting; ask without it
         }
         return res;
     }
 
-    private static HttpResponse<String> send(String key, String model, String body) throws IOException, InterruptedException {
+    private static HttpResponse<String> send(String key, String model, int seconds, String body) throws IOException, InterruptedException {
         long t0 = System.nanoTime();
-        HttpResponse<String> r = sendOnce(key, model, body);
+        HttpResponse<String> r = sendOnce(key, model, seconds, body);
         System.out.printf("Gemini %s -> %d in %d ms%n", model, r.statusCode(), (System.nanoTime() - t0) / 1_000_000);
         return r;
     }
 
-    private static HttpResponse<String> sendOnce(String key, String model, String body) throws IOException, InterruptedException {
+    private static HttpResponse<String> sendOnce(String key, String model, int seconds, String body) throws IOException, InterruptedException {
         return HTTP.send(HttpRequest.newBuilder(
                         URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"))
-                .timeout(Duration.ofSeconds(90))
+                .timeout(Duration.ofSeconds(seconds))
                 .header("Content-Type", "application/json")
                 .header("x-goog-api-key", key)
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    private static boolean busy(HttpResponse<String> res) {
-        int c = res.statusCode();
+    private static boolean busy(Reply res) {
+        int c = res.status();
         return c == 429 || c == 500 || c == 502 || c == 503 || c == 504;
     }
 
@@ -140,6 +161,22 @@ public final class Gemini {
         ids.sort(java.util.Comparator.comparingDouble((String id) -> -Double.parseDouble(id.replaceAll("^gemini-([\\d.]+)-.*$", "$1")))
                 .thenComparingInt(id -> id.contains("preview") ? 2 : id.contains("-lite") ? 1 : 0));
         return ids;
+    }
+
+    private static volatile String lite;
+
+    /** The newest lite flash model (fast at reading documents), or null if the key can't list any. */
+    private static String fastest(String key) throws IOException, InterruptedException {
+        if (lite == null) {
+            HttpResponse<String> res = HTTP.send(HttpRequest.newBuilder(
+                            URI.create("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200"))
+                    .timeout(Duration.ofSeconds(20)).header("x-goog-api-key", key).GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 200) {
+                lite = flashModels(res.body()).stream().filter(m -> m.contains("-lite") && !m.contains("preview")).findFirst()
+                        .orElse(flashModels(res.body()).stream().filter(m -> m.contains("-lite")).findFirst().orElse(null));
+            }
+        }
+        return lite;
     }
 
     /** The newest general "flash" model this key may call, from Google's own model list. */
