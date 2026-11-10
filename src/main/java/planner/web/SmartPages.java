@@ -114,8 +114,14 @@ final class SmartPages {
             return Response.redirect("/ai/review");
         } catch (Gemini.AiException e) {
             return Response.redirect("/tasks").flash(e.getMessage());
+        } catch (java.net.http.HttpTimeoutException e) {
+            System.err.println("Gemini timed out: " + e);
+            return Response.redirect("/tasks").flash("Gemini took longer than 90 seconds to answer. Try again; it's usually quicker on a second go.");
         } catch (IOException | InterruptedException e) {
-            return Response.redirect("/tasks").flash("Couldn't reach Gemini. Check your internet connection.");
+            System.err.println("Gemini request failed: " + e);
+            e.printStackTrace();
+            return Response.redirect("/tasks").flash("Couldn't reach Gemini (" + e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage()) + ").");
         }
     }
 

@@ -31,7 +31,8 @@ public final class Classroom {
     public static final String SCOPES = "https://www.googleapis.com/auth/classroom.courses.readonly "
             + "https://www.googleapis.com/auth/classroom.coursework.me.readonly";
     private static final String API = "https://classroom.googleapis.com/v1/";
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+    private static final HttpClient HTTP = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(15)).build();
 
     /** An assignment with a due date, in the student's own time zone. */
     public record Work(String id, String course, String title, String description, LocalDateTime due,

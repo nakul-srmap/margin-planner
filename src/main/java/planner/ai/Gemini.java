@@ -13,7 +13,8 @@ import java.time.Duration;
 /** Calls Google's Gemini API. The key comes from planner.properties (gemini.api.key) or GEMINI_API_KEY. */
 public final class Gemini {
 
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+    private static final HttpClient HTTP = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(15)).build();
 
     private Gemini() { }
 
@@ -87,9 +88,16 @@ public final class Gemini {
     }
 
     private static HttpResponse<String> send(String key, String model, String body) throws IOException, InterruptedException {
+        long t0 = System.nanoTime();
+        HttpResponse<String> r = sendOnce(key, model, body);
+        System.out.printf("Gemini %s -> %d in %d ms%n", model, r.statusCode(), (System.nanoTime() - t0) / 1_000_000);
+        return r;
+    }
+
+    private static HttpResponse<String> sendOnce(String key, String model, String body) throws IOException, InterruptedException {
         return HTTP.send(HttpRequest.newBuilder(
                         URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"))
-                .timeout(Duration.ofSeconds(45))
+                .timeout(Duration.ofSeconds(90))
                 .header("Content-Type", "application/json")
                 .header("x-goog-api-key", key)
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
