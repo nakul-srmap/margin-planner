@@ -46,14 +46,19 @@ public final class Assistant {
                 dashes, e.g. "CSE-204" = "CSE204") or, if no code is shown, by the course name. Ignore other subjects,
                 other branches' rows and holidays. If the datesheet has no year, use the next such date on or after today.
                 Reply with JSON only:
-                {"items":[{"kind":"exam","title":"exam name, e.g. Mid-semester or End-semester","subject":"the matching code from the list",
+                {"items":[{"kind":"exam","title":"exam name, e.g. Mid-semester or End-semester","subject":"the matching code exactly as written in the list above",
                 "date":"YYYY-MM-DD","time":"HH:MM 24-hour start time or null","minutes":0,"priority":"HIGH","note":"session or room if shown, else null"}]}
                 """.formatted(now.toLocalDate(), list.length() == 0 ? "(none)\n" : list);
+        String reply = Gemini.json(prompt, mimeType, base64);
         List<Draft> out = new ArrayList<>();
-        for (Draft d : read(Gemini.json(prompt, mimeType, base64), subjects, now)) {
+        for (Draft d : read(reply, subjects, now)) {
             if (d.subjectCode() != null) {
                 out.add(new Draft(true, d.title(), d.subjectCode(), d.date(), d.time(), 0, d.priority(), d.note()));
             }
+        }
+        if (out.isEmpty()) {
+            // Shows in the server log, to see what was read when nothing matched.
+            System.out.println("Datesheet: nothing matched. Gemini replied: " + (reply.length() > 2000 ? reply.substring(0, 2000) + "..." : reply));
         }
         return out;
     }
@@ -102,13 +107,7 @@ public final class Assistant {
                 continue;
             }
             boolean exam = "exam".equalsIgnoreCase(Json.str(m.get("kind")));
-            String code = Json.str(m.get("subject"));
-            String matched = null;
-            for (Subject s : subjects) {
-                if (code != null && s.code().replace(" ", "").equalsIgnoreCase(code.replace(" ", ""))) {
-                    matched = s.code();
-                }
-            }
+            String matched = match(Json.str(m.get("subject")), title, subjects);
             Integer minutes = Json.num(m.get("minutes"));
             int mins = minutes == null ? (exam ? 360 : 120) : Math.max(15, Math.min(6000, Math.round(minutes / 5f) * 5));
             Priority p;
@@ -124,20 +123,77 @@ public final class Assistant {
         return out;
     }
 
-    private static LocalDate date(String s) {
-        try {
-            return s == null ? null : LocalDate.parse(s.trim());
-        } catch (DateTimeParseException e) {
-            return null;
+    /**
+     * Finds the student's subject in what the model wrote: "CSE 213", "CSE-213 - Advanced Java" and
+     * "Advanced Java Programming" all match the subject coded CSE213.
+     */
+    static String match(String said, String title, List<Subject> subjects) {
+        for (String text : new String[] {said, title}) {
+            if (text == null) {
+                continue;
+            }
+            String flat = text.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+            for (Subject s : subjects) {
+                String code = s.code().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+                if (!code.isEmpty() && flat.contains(code)) {
+                    return s.code();
+                }
+            }
+            String lower = text.toLowerCase(Locale.ROOT);
+            for (Subject s : subjects) {
+                String name = s.name().toLowerCase(Locale.ROOT);
+                if (name.length() >= 5 && (lower.contains(name) || (lower.length() >= 8 && name.contains(lower.trim())))) {
+                    return s.code();
+                }
+            }
         }
+        return null;
     }
 
-    private static LocalTime time(String s) {
-        try {
-            return s == null || s.isBlank() || s.equals("null") ? null : LocalTime.parse(s.trim().length() == 4 ? "0" + s.trim() : s.trim());
-        } catch (DateTimeParseException e) {
+    private static final java.time.format.DateTimeFormatter[] DATES = {
+            java.time.format.DateTimeFormatter.ofPattern("d-M-uuuu", Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d/M/uuuu", Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d.M.uuuu", Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d MMM uuuu", Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d MMMM uuuu", Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d-MMM-uuuu", Locale.ENGLISH),
+    };
+
+    /** ISO dates, plus the day-first forms Indian datesheets use (24-11-2026, 24/11/2026, 24 Nov 2026). */
+    static LocalDate date(String s) {
+        if (s == null || s.isBlank()) {
             return null;
         }
+        String t = s.trim().replaceAll("(?i)(\\d)(st|nd|rd|th)", "$1").replaceAll("\\s+", " ");
+        try {
+            return LocalDate.parse(t);
+        } catch (DateTimeParseException ignored) {
+            // try the day-first forms
+        }
+        for (java.time.format.DateTimeFormatter f : DATES) {
+            try {
+                return LocalDate.parse(t, f);
+            } catch (DateTimeParseException ignored) {
+                // next form
+            }
+        }
+        return null;
+    }
+
+    static LocalTime time(String s) {
+        if (s == null || s.isBlank() || s.equals("null")) {
+            return null;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)(\\d{1,2})[:.](\\d{2})\\s*(am|pm)?").matcher(s);
+        if (!m.find()) {
+            return null;
+        }
+        int h = Integer.parseInt(m.group(1));
+        int min = Integer.parseInt(m.group(2));
+        if (m.group(3) != null) {
+            h = h % 12 + (m.group(3).equalsIgnoreCase("pm") ? 12 : 0);
+        }
+        return h < 24 && min < 60 ? LocalTime.of(h, min) : null;
     }
 
     private static String cut(String s, int max) {

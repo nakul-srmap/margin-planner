@@ -215,6 +215,18 @@ public final class TestRunner {
         check("AI answer: subject codes match with or without a space", "CSE204".equals(drafts.get(0).subjectCode()));
         check("AI answer: minutes are rounded and capped", drafts.get(0).minutes() == 185 && drafts.get(1).minutes() == 6000);
         check("AI answer: unknown priority becomes Normal", drafts.get(1).priority() == planner.domain.Records.Priority.MEDIUM && drafts.get(1).exam());
+        var subj2 = java.util.List.of(new planner.domain.Records.Subject(2, "CSE213", "Advanced Java Programming", 3,
+                planner.domain.Records.Highlighter.blue, 0, 0), new planner.domain.Records.Subject(3, "POL245", "Text in Political Philosophy", 2,
+                planner.domain.Records.Highlighter.green, 0, 0));
+        var sheet = planner.ai.Assistant.read("""
+                {"items":[{"kind":"exam","title":"End-semester","subject":"CSE 213 - Advanced Java","date":"24-11-2026","time":"10:00 AM"},
+                {"kind":"exam","title":"Text in Political Philosophy","subject":null,"date":"27 Nov 2026","time":"2.00 PM"},
+                {"kind":"exam","title":"Data Structures","subject":"CSE 201","date":"2026-11-25"}]}""", subj2, noon);
+        check("datesheet: codes with spaces and names match, others don't", sheet.size() == 3
+                && "CSE213".equals(sheet.get(0).subjectCode()) && "POL245".equals(sheet.get(1).subjectCode()) && sheet.get(2).subjectCode() == null);
+        check("datesheet: day-first dates and 12-hour times are read", sheet.get(0).date().toString().equals("2026-11-24")
+                && sheet.get(0).time().toString().equals("10:00") && sheet.get(1).date().toString().equals("2026-11-27")
+                && sheet.get(1).time().toString().equals("14:00"));
         Object cw = planner.json.Json.parse("""
                 {"id":"77","title":"Lab 4","alternateLink":"https://classroom.google.com/c/x/a/77","dueDate":{"year":2026,"month":11,"day":12},"dueTime":{"hours":18,"minutes":29}}""");
         var work = planner.google.Classroom.work(cw, "CSE 204 DAA", java.util.Map.of("77", "TURNED_IN"), java.time.ZoneId.of("Asia/Kolkata"));
