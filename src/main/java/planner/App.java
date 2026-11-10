@@ -1,5 +1,6 @@
 package planner;
 
+import planner.ai.Gemini;
 import planner.auth.Accounts;
 import planner.db.Db;
 import planner.db.Migrations;
@@ -60,9 +61,29 @@ public final class App {
             server.stop();
             db.close();
         }));
+        if (Gemini.configured()) {
+            Thread check = new Thread(App::networkCheck, "network-check");
+            check.setDaemon(true);
+            check.start();
+        }
         System.out.println();
         System.out.println("Margin is running at http://localhost:" + config.port());
         System.out.println("Press Ctrl+C to stop.");
+    }
+
+    /** Logs how long it takes to reach Google's AI service, so a slow network shows up in the log. */
+    private static void networkCheck() {
+        long t0 = System.nanoTime();
+        try {
+            var http = java.net.http.HttpClient.newBuilder().version(java.net.http.HttpClient.Version.HTTP_1_1)
+                    .connectTimeout(java.time.Duration.ofSeconds(15)).build();
+            var res = http.send(java.net.http.HttpRequest.newBuilder(
+                            java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"))
+                    .timeout(java.time.Duration.ofSeconds(60)).GET().build(), java.net.http.HttpResponse.BodyHandlers.discarding());
+            System.out.printf("Network check: Gemini service answered %d in %d ms%n", res.statusCode(), (System.nanoTime() - t0) / 1_000_000);
+        } catch (Exception e) {
+            System.out.printf("Network check: could not reach the Gemini service after %d ms (%s)%n", (System.nanoTime() - t0) / 1_000_000, e);
+        }
     }
 
     /** Creates the database on first run if the server is reachable but the database doesn't exist yet. */

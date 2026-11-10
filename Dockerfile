@@ -10,6 +10,6 @@ COPY --from=build /app/build/classes build/classes
 COPY lib lib
 # Plan in Indian time; keep memory inside a 512 MB free instance.
 ENV TZ=Asia/Kolkata \
-    JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -XX:TieredStopAtLevel=1"
+    JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true -Djava.security.egd=file:/dev/./urandom -XX:MaxRAMPercentage=70 -XX:+UseSerialGC -XX:TieredStopAtLevel=1"
 EXPOSE 8080
 CMD ["java", "-cp", "build/classes:lib/*", "planner.App"]
