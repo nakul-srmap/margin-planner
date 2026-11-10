@@ -75,7 +75,10 @@ public final class Server {
     }
 
     public void start(int port) throws IOException {
-        server = HttpServer.create(new InetSocketAddress(port), 64);
+        // Listen on IPv4 0.0.0.0 by default: hosting proxies such as Render's connect over IPv4,
+        // and inside some containers Java's default socket would only accept IPv6.
+        String host = planner.Config.setting("HOST", "host");
+        server = HttpServer.create(new InetSocketAddress(host == null ? "0.0.0.0" : host, port), 64);
         pool = Executors.newFixedThreadPool(Math.max(8, Runtime.getRuntime().availableProcessors() * 2));
         server.setExecutor(pool);
         server.createContext("/", this::handle);
@@ -94,21 +97,39 @@ public final class Server {
     /* ------------------------------------------------------------------------- */
 
     private void handle(HttpExchange exchange) throws IOException {
+        long started = System.nanoTime();
         Response response;
         Request request = null;
         try {
-            request = new Request(exchange);
-            response = dispatch(request);
-        } catch (HttpException e) {
-            response = Response.html(e.status(), errorPage.apply(request, e));
-        } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Unhandled error on " + exchange.getRequestMethod() + " "
-                    + exchange.getRequestURI(), e);
-            response = Response.html(500, errorPage.apply(request,
-                    new HttpException(500, "Something went wrong on our side. The error has been logged.")));
+            try {
+                request = new Request(exchange);
+                response = dispatch(request);
+            } catch (HttpException e) {
+                response = Response.html(e.status(), errorPage.apply(request, e));
+            } catch (Throwable e) {
+                LOG.log(Level.SEVERE, "Unhandled error on " + exchange.getRequestMethod() + " "
+                        + exchange.getRequestURI(), e);
+                response = Response.html(500, "<!doctype html><title>Error</title><p>Something went wrong on our side. The error has been logged.</p>");
+                try {
+                    response = Response.html(500, errorPage.apply(request,
+                            new HttpException(500, "Something went wrong on our side. The error has been logged.")));
+                } catch (Throwable ignored) {
+                    // keep the plain page
+                }
+            }
+            write(exchange, request, response);
+            if (LOG_REQUESTS) {
+                System.out.printf("%s %s -> %d in %d ms%n", exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
+                        response.status(), (System.nanoTime() - started) / 1_000_000);
+            }
+        } catch (Throwable e) {
+            LOG.log(Level.SEVERE, "Could not answer " + exchange.getRequestURI(), e);
+            exchange.close();   // never leave a browser waiting
         }
-        write(exchange, request, response);
     }
+
+    /** Request lines in the log help when hosted; set LOG_REQUESTS=false to silence them. */
+    private static final boolean LOG_REQUESTS = !"false".equalsIgnoreCase(String.valueOf(planner.Config.setting("LOG_REQUESTS", "log.requests")));
 
     private Response dispatch(Request request) throws Exception {
         Asset asset = assets.get(request.path());
