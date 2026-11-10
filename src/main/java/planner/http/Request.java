@@ -18,7 +18,7 @@ import java.util.Optional;
 /** One incoming request, with its query string, form body, cookies and session decoded. */
 public final class Request {
 
-    private static final int MAX_FORM_BYTES = 3 * 1024 * 1024;   // room for a pasted portal page
+    private static final int MAX_FORM_BYTES = 12 * 1024 * 1024;   // room for a pasted portal page or an uploaded datesheet
 
     private final HttpExchange exchange;
     private final String method;

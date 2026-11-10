@@ -230,8 +230,10 @@ public final class TestRunner {
         check("Gemini: fallbacks are newest first, plain before lite", planner.ai.Gemini.flashModels("""
                 {"models":[{"name":"models/gemini-2.5-flash","supportedGenerationMethods":["generateContent"]},
                 {"name":"models/gemini-3.6-flash-lite","supportedGenerationMethods":["generateContent"]},
-                {"name":"models/gemini-3.6-flash","supportedGenerationMethods":["generateContent"]}]}""")
-                .equals(java.util.List.of("gemini-3.6-flash", "gemini-3.6-flash-lite", "gemini-2.5-flash")));
+                {"name":"models/gemini-3.6-flash","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-3.8-flash-lite-preview","supportedGenerationMethods":["generateContent"]},
+                {"name":"models/gemini-3.8-flash-image","supportedGenerationMethods":["generateContent"]}]}""")
+                .equals(java.util.List.of("gemini-3.8-flash-lite-preview", "gemini-3.6-flash", "gemini-3.6-flash-lite", "gemini-2.5-flash")));
 
         String[] neon = Config.fromDatabaseUrl("postgresql://margin_owner:p%40ss@ep-cool-1.ap-southeast-1.aws.neon.tech/margin?sslmode=require&channel_binding=require");
         check("hosted DATABASE_URL becomes a JDBC URL", neon[0].equals("jdbc:postgresql://ep-cool-1.ap-southeast-1.aws.neon.tech/margin?sslmode=require")
@@ -247,6 +249,11 @@ public final class TestRunner {
         String afterAdd = e.get("/").body() + e.get("/?week=" + LocalDate.now().plusDays(7)).body();
         check("adding a task re-plans the week by itself", autoAdd.statusCode() == 303 && afterAdd.contains("Auto planned work")
                 && afterAdd.contains("block study"));
+        e.get("/exams");
+        check("a datesheet upload without a file is refused politely", e.post("/ai/datesheet", "data", "", "mime", "image/png")
+                .headers().firstValue("location").orElse("").equals("/exams"));
+        check("a datesheet of the wrong type is refused", e.post("/ai/datesheet", "data", "QUJD", "mime", "text/html")
+                .headers().firstValue("location").orElse("").equals("/exams"));
         check("automatic planning can be switched off", e.post("/settings/auto", "mode", "EXAM").statusCode() == 303
                 && !e.get("/settings").body().contains("name=\"auto\" value=\"1\" checked"));
 

@@ -386,7 +386,7 @@ final class SetupPages {
                 "start", f.input("start", "Starts", "time", "optional", ""),
                 "weight", f.input("weightage", "Weight", "number", "% of the grade", "min=\"1\" max=\"100\""));
 
-        String body = Layout.head("Exams", null, null)
+        String body = Layout.head("Exams", null, null) + SmartPages.datesheetBox(req)
                 + "<div class=\"split-wide\"><div>" + list + "</div><aside><h2 style=\"margin-bottom:.8rem\">Add an exam</h2>" + form
                 + (subjects.isEmpty() ? "<p class=\"note\" style=\"margin-top:1rem\"><a href=\"/subjects\">Add a subject</a> first.</p>" : "")
                 + "</aside></div>";

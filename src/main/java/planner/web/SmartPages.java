@@ -37,6 +37,7 @@ final class SmartPages {
         r.post("/ai/understand", this::understand);
         r.get("/ai/review", req -> Response.html(review(req)));
         r.post("/ai/apply", this::apply);
+        r.post("/ai/datesheet", this::datesheet);
         r.get("/classroom/connect", this::connect);
         r.get("/classroom/callback", this::callback);
         r.post("/classroom/sync", req -> sync(req, "Synced"));
@@ -125,6 +126,54 @@ final class SmartPages {
         }
     }
 
+    /** The datesheet upload box on the Exams page. The file is read in the browser and sent as base64. */
+    static String datesheetBox(Request req) {
+        if (!Gemini.configured()) {
+            return "";
+        }
+        return Html.t("""
+                <form class="panel ai-box" method="post" action="/ai/datesheet" data-datesheet>{{{csrf}}}
+                  <label for="ds-file"><h2>Upload your datesheet</h2></label>
+                  <p class="note" style="margin-bottom:.8rem">A photo, screenshot or PDF of your exam timetable. Gemini finds the exams for your subjects; you check them before they're added.</p>
+                  <input id="ds-file" type="file" accept="image/png,image/jpeg,image/webp,application/pdf" required data-file-to="ds">
+                  <input type="hidden" name="data" id="ds-data"><input type="hidden" name="mime" id="ds-mime">
+                  <div class="form-foot"><button class="button" type="submit" data-busy="Reading the datesheet...">Read datesheet</button>
+                  <span class="note">Up to 8 MB.</span></div>
+                </form>""", "csrf", Html.csrf(req));
+    }
+
+    private Response datesheet(Request req) {
+        String data = req.param("data");
+        String mime = req.text("mime");
+        if (data == null || data.isBlank()) {
+            return Response.redirect("/exams").flash("Choose a datesheet file first.");
+        }
+        if (!java.util.List.of("image/png", "image/jpeg", "image/webp", "application/pdf").contains(mime)) {
+            return Response.redirect("/exams").flash("Use a PNG, JPG, WEBP image or a PDF.");
+        }
+        if (data.length() > 11_000_000) {
+            return Response.redirect("/exams").flash("That file is over 8 MB. Use a smaller screenshot or PDF.");
+        }
+        List<Subject> subjects = ctx.store().subjects(req.userId());
+        if (subjects.isEmpty()) {
+            return Response.redirect("/subjects").flash("Add your subjects first, so Margin knows which exams on the datesheet are yours.");
+        }
+        try {
+            List<Draft> found = Assistant.datesheet(data.trim(), mime, subjects, ctx.now());
+            if (found.isEmpty()) {
+                return Response.redirect("/exams").flash("No exams for your subjects were found on that datesheet. Check your subject codes match it.");
+            }
+            drafts.put(req.session().id(), found);
+            return Response.redirect("/ai/review");
+        } catch (Gemini.AiException e) {
+            return Response.redirect("/exams").flash(e.getMessage());
+        } catch (java.net.http.HttpTimeoutException e) {
+            return Response.redirect("/exams").flash("Gemini took too long to read the datesheet. Try again, or use a smaller image.");
+        } catch (IOException | InterruptedException e) {
+            return Response.redirect("/exams").flash("Couldn't reach Gemini (" + e.getClass().getSimpleName() + ").");
+        }
+    }
+
     private String review(Request req) {
         List<Draft> list = drafts.get(req.session().id());
         if (list == null) {
@@ -139,12 +188,12 @@ final class SmartPages {
             rows.append(Html.t("""
                     <li><label class="draft"><input type="checkbox" name="pick" value="{{i}}" checked>
                       <span class="kind kind-{{kindCls}}">{{kind}}</span>
-                      <span><b>{{title}}</b> {{{code}}}<br><span class="meta">{{due}} · {{mins}} · {{priority}} priority</span>{{{note}}}</span>
+                      <span><b>{{title}}</b> {{{code}}}<br><span class="meta">{{due}}{{mins}} · {{priority}} priority</span>{{{note}}}</span>
                     </label></li>""",
                     "i", i, "kindCls", d.exam() ? "exam" : "task", "kind", d.exam() ? "Exam" : "Task", "title", d.title(),
                     "code", s == null ? "" : Layout.hl(s.code(), s.highlighter()),
                     "due", (d.exam() ? "On " : "Due ") + Text.date(d.date()) + (d.time() == null ? "" : " at " + Text.time(d.time())),
-                    "mins", (d.exam() ? "about " : "") + Text.duration(d.minutes()) + (d.exam() ? " of revision" : ""),
+                    "mins", d.exam() ? (d.minutes() > 0 ? " · about " + Text.duration(d.minutes()) + " of revision" : "") : " · " + Text.duration(d.minutes()),
                     "priority", d.priority().label(),
                     "note", d.note() == null ? "" : "<span class=\"note\">" + Html.esc(d.note()) + "</span>"));
         }
@@ -166,6 +215,11 @@ final class SmartPages {
         Map<String, Subject> subjects = subjects(uid);
         int tasks = 0;
         int exams = 0;
+        int duplicates = 0;
+        java.util.Set<String> existing = new java.util.HashSet<>();
+        for (var ex : ctx.store().exams(uid)) {
+            existing.add(ex.subjectCode() + "|" + ex.date());
+        }
         for (String pick : req.params("pick")) {
             int i;
             try {
@@ -179,6 +233,10 @@ final class SmartPages {
             Draft d = list.get(i);
             Subject s = d.subjectCode() == null ? null : subjects.get(d.subjectCode());
             if (d.exam() && s != null) {
+                if (!existing.add(s.code() + "|" + d.date())) {
+                    duplicates++;   // already have this subject's exam on that day
+                    continue;
+                }
                 ctx.store().addExam(uid, s.id(), d.title(), d.date(), d.time(), 30);
                 exams++;
             } else {
@@ -190,10 +248,11 @@ final class SmartPages {
         }
         String added = (tasks > 0 ? Text.plural(tasks, "task", "tasks") : "")
                 + (tasks > 0 && exams > 0 ? " and " : "") + (exams > 0 ? Text.plural(exams, "exam", "exams") : "");
+        String dup = duplicates == 0 ? "" : " Skipped " + Text.plural(duplicates, "exam", "exams") + " you already had.";
         if (added.isEmpty()) {
-            return Response.redirect("/tasks").flash("Nothing was ticked, so nothing was added.");
+            return Response.redirect(duplicates > 0 ? "/exams" : "/tasks").flash(duplicates > 0 ? dup.trim() : "Nothing was ticked, so nothing was added.");
         }
-        return Response.redirect("/").flash("Added " + added + "." + ctx.autoPlan(uid));
+        return Response.redirect(exams > 0 && tasks == 0 ? "/exams" : "/").flash("Added " + added + "." + dup + ctx.autoPlan(uid));
     }
 
     private Map<String, Subject> subjects(long uid) {

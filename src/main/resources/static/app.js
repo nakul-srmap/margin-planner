@@ -178,6 +178,20 @@
     if (file) document.getElementById(input.dataset.loadInto).value = await file.text();
   }));
 
+  /* ---------- datesheet upload: read the file here and send it as base64 ---------- */
+  $$("input[type=file][data-file-to]").forEach(input => input.addEventListener("change", () => {
+    const file = input.files[0], key = input.dataset.fileTo;
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { toast("That file is over 8 MB. Use a smaller screenshot or PDF."); input.value = ""; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      document.getElementById(key + "-data").value = url.slice(url.indexOf(",") + 1);
+      document.getElementById(key + "-mime").value = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+    };
+    reader.readAsDataURL(file);
+  }));
+
   /* ---------- filter the task list ---------- */
   const search = $("[data-filter]");
   if (search) {

@@ -24,13 +24,19 @@ public final class Gemini {
 
     /** Sends a prompt and returns the model's reply, which is asked to be JSON. */
     public static String json(String prompt) throws IOException, InterruptedException {
+        return json(prompt, null, null);
+    }
+
+    /** Same, with a file (an image or PDF, base64-encoded) sent alongside the prompt. */
+    public static String json(String prompt, String mimeType, String base64) throws IOException, InterruptedException {
         String key = Config.setting("GEMINI_API_KEY", "gemini.api.key");
         if (key == null) {
             throw new AiException("Add your Gemini API key to planner.properties as gemini.api.key, then restart Margin.");
         }
         String chosen = Config.setting("GEMINI_MODEL", "gemini.model");
         String model = chosen != null ? chosen : found != null ? found : "gemini-flash-latest";
-        String body = "{\"contents\":[{\"parts\":[{\"text\":" + Json.quote(prompt) + "}]}],"
+        String file = base64 == null ? "" : ",{\"inlineData\":{\"mimeType\":" + Json.quote(mimeType) + ",\"data\":" + Json.quote(base64) + "}}";
+        String body = "{\"contents\":[{\"parts\":[{\"text\":" + Json.quote(prompt) + "}" + file + "]}],"
                 + "\"generationConfig\":{\"responseMimeType\":\"application/json\",\"temperature\":0.2}}";
         HttpResponse<String> res = call(key, model, body);
         if (chosen == null && (res.statusCode() == 404 || res.statusCode() == 401 || res.statusCode() == 400)) {
@@ -42,8 +48,8 @@ public final class Gemini {
                 res = call(key, model, body);
             }
         }
-        // Busy or briefly failing: wait and retry, then try other current models.
-        for (int attempt = 0; busy(res) && attempt < 2; attempt++) {
+        // Busy or briefly failing: retry once, then try other current models (also when gemini.model is set).
+        for (int attempt = 0; busy(res) && attempt < 1; attempt++) {
             Thread.sleep(1500L * (attempt + 1));
             res = call(key, model, body);
         }
@@ -108,14 +114,14 @@ public final class Gemini {
         return c == 429 || c == 500 || c == 502 || c == 503 || c == 504;
     }
 
-    /** Other flash models to fall back on when one is overloaded, newest first, at most three. */
+    /** Other flash models to fall back on when one is overloaded, newest first, at most five. */
     private static java.util.List<String> alternatives(String key, String skip) throws IOException, InterruptedException {
         HttpResponse<String> res = HTTP.send(HttpRequest.newBuilder(
                         URI.create("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200"))
                 .timeout(Duration.ofSeconds(20)).header("x-goog-api-key", key).GET().build(), HttpResponse.BodyHandlers.ofString());
         java.util.List<String> out = res.statusCode() == 200 ? flashModels(res.body()) : new java.util.ArrayList<>();
         out.remove(skip);
-        return out.subList(0, Math.min(3, out.size()));
+        return out.subList(0, Math.min(5, out.size()));
     }
 
     /** Plain and lite flash models that can generate content, newest version first. */
@@ -125,13 +131,14 @@ public final class Gemini {
             String name = Json.str(Json.at(m, "name"));
             if (name != null && Json.arr(Json.at(m, "supportedGenerationMethods")).contains("generateContent")) {
                 String id = name.replaceFirst("^models/", "");
-                if (id.matches("gemini-\\d+(\\.\\d+)?-flash(-lite)?")) {
-                    ids.add(id);
+                if (id.matches("gemini-\\d+(\\.\\d+)?-flash(-lite)?(-preview)?(-[0-9-]+)?")) {
+                    ids.add(id);   // plain, lite and preview text models; image, audio and live variants don't match
                 }
             }
         }
+        // Newest first; within a version: plain, then lite, then previews.
         ids.sort(java.util.Comparator.comparingDouble((String id) -> -Double.parseDouble(id.replaceAll("^gemini-([\\d.]+)-.*$", "$1")))
-                .thenComparing(id -> id.endsWith("-lite")));
+                .thenComparingInt(id -> id.contains("preview") ? 2 : id.contains("-lite") ? 1 : 0));
         return ids;
     }
 

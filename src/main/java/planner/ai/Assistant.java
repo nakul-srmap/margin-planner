@@ -31,6 +31,33 @@ public final class Assistant {
         return read(Gemini.json(prompt(text, subjects, now)), subjects, now);
     }
 
+    /** Reads an exam datesheet (photo, screenshot or PDF) and returns the exams for the student's own subjects. */
+    public static List<Draft> datesheet(String base64, String mimeType, List<Subject> subjects, LocalDateTime now)
+            throws IOException, InterruptedException {
+        StringBuilder list = new StringBuilder();
+        for (Subject s : subjects) {
+            list.append("- ").append(s.code()).append(": ").append(s.name()).append('\n');
+        }
+        String prompt = """
+                This file is a university exam datesheet (exam timetable). Today is %s.
+                The student takes only these subjects:
+                %s
+                List every exam in the datesheet for THESE subjects only. Match by course code (ignore spaces and
+                dashes, e.g. "CSE-204" = "CSE204") or, if no code is shown, by the course name. Ignore other subjects,
+                other branches' rows and holidays. If the datesheet has no year, use the next such date on or after today.
+                Reply with JSON only:
+                {"items":[{"kind":"exam","title":"exam name, e.g. Mid-semester or End-semester","subject":"the matching code from the list",
+                "date":"YYYY-MM-DD","time":"HH:MM 24-hour start time or null","minutes":0,"priority":"HIGH","note":"session or room if shown, else null"}]}
+                """.formatted(now.toLocalDate(), list.length() == 0 ? "(none)\n" : list);
+        List<Draft> out = new ArrayList<>();
+        for (Draft d : read(Gemini.json(prompt, mimeType, base64), subjects, now)) {
+            if (d.subjectCode() != null) {
+                out.add(new Draft(true, d.title(), d.subjectCode(), d.date(), d.time(), 0, d.priority(), d.note()));
+            }
+        }
+        return out;
+    }
+
     static String prompt(String text, List<Subject> subjects, LocalDateTime now) {
         StringBuilder list = new StringBuilder();
         for (Subject s : subjects) {
