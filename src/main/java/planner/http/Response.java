@@ -73,6 +73,6 @@ public final class Response {
     String flashCookie() {
         return flash == null ? null
                 : "flash=" + URLEncoder.encode(flash, StandardCharsets.UTF_8)
-                        + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=60";
+                        + "; Path=/; HttpOnly; SameSite=Lax" + Server.SECURE + "; Max-Age=60";
     }
 }

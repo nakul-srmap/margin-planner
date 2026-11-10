@@ -86,8 +86,8 @@ final class SmartPages {
                     <p class="note" style="margin-top:.8rem">Read-only. If your college blocks it, copy your Classroom to-do list into Quick add instead.</p></section>""";
         }
         Instant synced = account.get().syncedAt();
-        String when = synced == null ? "Not synced yet." : "Last synced " + Text.day(LocalDateTime.ofInstant(synced, ZoneId.systemDefault()).toLocalDate(), ctx.now().toLocalDate())
-                + " at " + Text.time(LocalDateTime.ofInstant(synced, ZoneId.systemDefault()).toLocalTime()) + ".";
+        String when = synced == null ? "Not synced yet." : "Last synced " + Text.day(LocalDateTime.ofInstant(synced, ctx.clock().getZone()).toLocalDate(), ctx.now().toLocalDate())
+                + " at " + Text.time(LocalDateTime.ofInstant(synced, ctx.clock().getZone()).toLocalTime()) + ".";
         return Html.t("""
                 <section class="panel classroom"><h2>Google Classroom</h2>
                   <p class="note" style="margin-bottom:1rem">Connected. {{when}}</p>
@@ -201,6 +201,10 @@ final class SmartPages {
     /* ======================= Google Classroom ======================= */
 
     private static String redirect(Request req) {
+        String site = planner.Config.setting("PUBLIC_URL", "public.url");
+        if (site != null) {
+            return site.replaceAll("/+$", "") + "/classroom/callback";
+        }
         String host = req.header("Host");
         return "http://" + (host == null || !host.matches("(localhost|127\\.0\\.0\\.1)(:\\d+)?") ? "localhost:8080" : host) + "/classroom/callback";
     }
@@ -248,7 +252,7 @@ final class SmartPages {
                 ctx.store().saveGoogleTokens(uid, t.refresh(), t.access(), t.expires());
                 access = t.access();
             }
-            List<Classroom.Work> work = Classroom.assignments(access, ZoneId.systemDefault());
+            List<Classroom.Work> work = Classroom.assignments(access, ctx.clock().getZone());
             List<Subject> subjects = ctx.store().subjects(uid);
             LocalDateTime cutoff = ctx.now().minusDays(14);
             int created = 0;

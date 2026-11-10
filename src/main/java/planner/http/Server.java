@@ -184,7 +184,7 @@ public final class Server {
         }
         if (request != null && request.csrfIssued()) {
             headers.add("Set-Cookie", ANON_CSRF_COOKIE + "=" + request.csrf()
-                    + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400");
+                    + "; Path=/; HttpOnly; SameSite=Lax" + SECURE + "; Max-Age=86400");
         }
         String flashCookie = response.flashCookie();
         if (flashCookie != null) {
@@ -204,8 +204,12 @@ public final class Server {
         exchange.close();
     }
 
+    /** "; Secure" when the site is served over https (PUBLIC_URL starts with https://). */
+    public static final String SECURE = String.valueOf(planner.Config.setting("PUBLIC_URL", "public.url")).startsWith("https://")
+            ? "; Secure" : "";
+
     public static String sessionCookie(String id) {
-        return SESSION_COOKIE + "=" + id + "; Path=/; HttpOnly; SameSite=Lax; Max-Age="
+        return SESSION_COOKIE + "=" + id + "; Path=/; HttpOnly; SameSite=Lax" + Server.SECURE + "; Max-Age="
                 + (Accounts.SESSION_DAYS * 24 * 3600);
     }
 

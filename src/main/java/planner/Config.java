@@ -45,6 +45,13 @@ public record Config(String dbUrl, String dbUser, String dbPassword, int port) {
                 "jdbc:postgresql://localhost:5432/planner");
         String user = pick("DB_USER", file.getProperty("db.user"), "postgres");
         String password = pick("DB_PASSWORD", file.getProperty("db.password"), "postgres");
+        String hosted = System.getenv("DATABASE_URL");
+        if (hosted != null && !hosted.isBlank() && System.getenv("DB_URL") == null) {
+            String[] parsed = fromDatabaseUrl(hosted.trim());
+            url = parsed[0];
+            user = parsed[1];
+            password = parsed[2];
+        }
         String port = pick("PORT", file.getProperty("port"), "8080");
 
         try {
@@ -52,6 +59,21 @@ public record Config(String dbUrl, String dbUser, String dbPassword, int port) {
         } catch (NumberFormatException e) {
             throw new IllegalStateException("port must be a number, got '" + port + "'");
         }
+    }
+
+    /**
+     * Turns a hosting provider's postgresql://user:pass@host:port/db?sslmode=require into the
+     * JDBC URL, user and password the driver needs.
+     */
+    public static String[] fromDatabaseUrl(String value) {
+        java.net.URI u = java.net.URI.create(value.replaceFirst("^postgres(ql)?://", "http://"));
+        String info = u.getRawUserInfo() == null ? "" : u.getRawUserInfo();
+        int colon = info.indexOf(':');
+        String user = java.net.URLDecoder.decode(colon < 0 ? info : info.substring(0, colon), StandardCharsets.UTF_8);
+        String pass = colon < 0 ? "" : java.net.URLDecoder.decode(info.substring(colon + 1), StandardCharsets.UTF_8);
+        String ssl = u.getQuery() != null && u.getQuery().contains("sslmode=disable") ? "" : "?sslmode=require";
+        String jdbc = "jdbc:postgresql://" + u.getHost() + (u.getPort() > 0 ? ":" + u.getPort() : "") + u.getPath() + ssl;
+        return new String[] {jdbc, user, pass};
     }
 
     /** An optional setting, from the environment or planner.properties; null when not set. */

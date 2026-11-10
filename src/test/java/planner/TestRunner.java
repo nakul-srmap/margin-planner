@@ -233,6 +233,10 @@ public final class TestRunner {
                 {"name":"models/gemini-3.6-flash","supportedGenerationMethods":["generateContent"]}]}""")
                 .equals(java.util.List.of("gemini-3.6-flash", "gemini-3.6-flash-lite", "gemini-2.5-flash")));
 
+        String[] neon = Config.fromDatabaseUrl("postgresql://margin_owner:p%40ss@ep-cool-1.ap-southeast-1.aws.neon.tech/margin?sslmode=require&channel_binding=require");
+        check("hosted DATABASE_URL becomes a JDBC URL", neon[0].equals("jdbc:postgresql://ep-cool-1.ap-southeast-1.aws.neon.tech/margin?sslmode=require")
+                && neon[1].equals("margin_owner") && neon[2].equals("p@ss"));
+
         Browser e = new Browser(site);
         e.get("/signup");
         e.post("/signup", "name", "Eve", "email", "eve@example.com", "password", "auto plan please");

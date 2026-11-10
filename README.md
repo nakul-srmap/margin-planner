@@ -115,6 +115,31 @@ Notes:
 - If Google says **"Access blocked"** for your college account, your college's Google admin
   hasn't allowed outside apps. Copy your Classroom to-do list into **Quick add with AI** instead.
 
+## Host it online (free: Render + Neon)
+
+The app runs on Render's free web service (it sleeps after 15 idle minutes and takes about a
+minute to wake) with a free Neon PostgreSQL database, which doesn't expire.
+
+1. **Database.** At https://neon.tech create a project (region: Singapore). Copy the
+   connection string; it looks like `postgresql://user:password@ep-....neon.tech/neondb?sslmode=require`.
+2. **Code.** Push this folder to a GitHub repository.
+3. **App.** At https://render.com: **New → Web Service**, connect the repository. Render finds
+   the `Dockerfile`. Choose the **Free** instance and the Singapore region, and add these
+   environment variables:
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | the Neon connection string |
+   | `PUBLIC_URL` | your site's address, e.g. `https://margin-planner.onrender.com` |
+   | `GEMINI_API_KEY` | optional, for AI quick add |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | optional, for Classroom |
+
+4. **Classroom on the hosted site.** In Google Cloud, edit your OAuth client and add the
+   redirect URI `https://YOUR-SITE.onrender.com/classroom/callback`.
+
+The container runs in Indian time (`TZ=Asia/Kolkata` in the Dockerfile); change it there if needed.
+Anyone with the link can create an account, and everyone's AI quick add uses your Gemini key.
+
 ## What it does
 
 - **This week**: your timetable in pencil grey, planned study in each subject's highlighter
