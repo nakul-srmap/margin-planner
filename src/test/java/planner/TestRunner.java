@@ -224,6 +224,10 @@ public final class TestRunner {
                 {"kind":"exam","title":"Data Structures","subject":"CSE 201","date":"2026-11-25"}]}""", subj2, noon);
         check("datesheet: codes with spaces and names match, others don't", sheet.size() == 3
                 && "CSE213".equals(sheet.get(0).subjectCode()) && "POL245".equals(sheet.get(1).subjectCode()) && sheet.get(2).subjectCode() == null);
+        var shaped = planner.ai.Assistant.read("""
+                {"items":[{"kind":"End-Term","subject":"CSE213","date":"2026-12-09","time":"09:30","minutes":180,"priority":"HIGH","note":null}]}""", subj2, noon);
+        check("datesheet: an exam name given as \"kind\" with no title is kept", shaped.size() == 1
+                && shaped.get(0).title().equals("End-Term") && shaped.get(0).exam() && "CSE213".equals(shaped.get(0).subjectCode()));
         check("datesheet: day-first dates and 12-hour times are read", sheet.get(0).date().toString().equals("2026-11-24")
                 && sheet.get(0).time().toString().equals("10:00") && sheet.get(1).date().toString().equals("2026-11-27")
                 && sheet.get(1).time().toString().equals("14:00"));

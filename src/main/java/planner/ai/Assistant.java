@@ -42,11 +42,12 @@ public final class Assistant {
                 This file is a university exam datesheet (exam timetable). Today is %s.
                 The student takes only these subjects:
                 %s
-                List every exam in the datesheet for THESE subjects only. Match by course code (ignore spaces and
+                List every exam in the datesheet for THESE subjects only. "kind" is always the word "exam";
+                put the exam's name in "title". Match by course code (ignore spaces and
                 dashes, e.g. "CSE-204" = "CSE204") or, if no code is shown, by the course name. Ignore other subjects,
                 other branches' rows and holidays. If the datesheet has no year, use the next such date on or after today.
                 Reply with JSON only:
-                {"items":[{"kind":"exam","title":"exam name, e.g. Mid-semester or End-semester","subject":"the matching code exactly as written in the list above",
+                {"items":[{"kind":"exam","title":"exam name, e.g. Mid-semester or End-Term","subject":"the matching code exactly as written in the list above",
                 "date":"YYYY-MM-DD","time":"HH:MM 24-hour start time or null","minutes":0,"priority":"HIGH","note":"session or room if shown, else null"}]}
                 """.formatted(now.toLocalDate(), list.length() == 0 ? "(none)\n" : list);
         String reply = Gemini.json(prompt, mimeType, base64);
@@ -100,13 +101,21 @@ public final class Assistant {
         List<Draft> out = new ArrayList<>();
         for (Object o : items) {
             Map<String, Object> m = Json.obj(o);
+            String kind = Json.str(m.get("kind"));
             String title = Json.str(m.get("title"));
+            if (title == null || title.isBlank()) {
+                // Models sometimes put the exam's name ("End-Term") in "kind" and leave out "title".
+                title = kind != null && !kind.equalsIgnoreCase("task") && !kind.equalsIgnoreCase("exam") ? kind
+                        : Json.str(m.get("name")) != null ? Json.str(m.get("name"))
+                        : "exam".equalsIgnoreCase(kind) ? "Exam" : null;
+            }
             LocalDate date = date(Json.str(m.get("date")));
             if (title == null || title.isBlank() || date == null || date.isBefore(now.toLocalDate().minusDays(1))
                     || date.isAfter(now.toLocalDate().plusYears(1))) {
                 continue;
             }
-            boolean exam = "exam".equalsIgnoreCase(Json.str(m.get("kind")));
+            boolean exam = kind != null && !kind.equalsIgnoreCase("task")
+                    && (kind.equalsIgnoreCase("exam") || kind.toLowerCase(Locale.ROOT).matches(".*(exam|term|sem|test|quiz|final|mid|cat).*"));
             String matched = match(Json.str(m.get("subject")), title, subjects);
             Integer minutes = Json.num(m.get("minutes"));
             int mins = minutes == null ? (exam ? 360 : 120) : Math.max(15, Math.min(6000, Math.round(minutes / 5f) * 5));
