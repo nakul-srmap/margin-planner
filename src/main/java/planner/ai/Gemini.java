@@ -76,10 +76,20 @@ public final class Gemini {
 
     private static volatile String found;
 
+    /** Asks the model to think briefly: reading dates from a note doesn't need deep reasoning, and it's much faster. */
     private static HttpResponse<String> call(String key, String model, String body) throws IOException, InterruptedException {
+        String thinking = model.startsWith("gemini-2") ? "\"thinkingConfig\":{\"thinkingBudget\":0}," : "\"thinkingConfig\":{\"thinkingLevel\":\"low\"},";
+        HttpResponse<String> res = send(key, model, body.replace("\"generationConfig\":{", "\"generationConfig\":{" + thinking));
+        if (res.statusCode() == 400 && res.body().toLowerCase().contains("think")) {
+            res = send(key, model, body);   // this model doesn't take that setting; ask without it
+        }
+        return res;
+    }
+
+    private static HttpResponse<String> send(String key, String model, String body) throws IOException, InterruptedException {
         return HTTP.send(HttpRequest.newBuilder(
                         URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"))
-                .timeout(Duration.ofSeconds(60))
+                .timeout(Duration.ofSeconds(45))
                 .header("Content-Type", "application/json")
                 .header("x-goog-api-key", key)
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
